@@ -1,0 +1,8 @@
+# data
+data/
+
+# ipynb related
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+**/.ipynb_checkpoints/
+**/.ipynb_checkpoints/**
