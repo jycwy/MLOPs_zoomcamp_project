@@ -9,6 +9,9 @@ pandas = "*"
 numpy = "*"
 kagglehub = "*"
 matplotlib = "*"
+scikit-learn = "*"
+seaborn = "*"
+scipy = "*"
 
 [dev-packages]
 
