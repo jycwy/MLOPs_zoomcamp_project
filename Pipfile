@@ -12,8 +12,13 @@ matplotlib = "*"
 scikit-learn = "*"
 seaborn = "*"
 scipy = "*"
+pyarrow = ">=15.0.0"
+mlflow = "*"
+xgboost = "*"
+python-dotenv = "*"
 
 [dev-packages]
+pytest = "*"
 
 [requires]
 python_version = "3.10"
