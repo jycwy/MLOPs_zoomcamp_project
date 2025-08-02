@@ -12,6 +12,30 @@ def load_parquet(path: str):
     df = pd.read_parquet(path)
     return df
 
+def split_data_randomly(
+        df, 
+        target_col: str = "Churn", 
+        test_size: float = 0.2, 
+        seed: int = 42
+    ):  
+    """
+    Split data randomly into training and validation sets
+    """
+
+    y_values = df[target_col].values
+    x_values = df.drop(columns=[target_col], axis=1)
+
+    x_train, x_test, y_train, y_test = train_test_split(
+        x_values, y_values, test_size=test_size, random_state=seed
+    )
+    return {
+        "x_train": x_train,
+        "x_test": x_test,
+        "y_train": y_train,
+        "y_test": y_test,
+    }
+
+
 def vectorize(df, target_col: str = "Churn"):
     """
     Returns X_train, X_val, y_train, y_val, DictVectorizer
@@ -25,3 +49,5 @@ def vectorize(df, target_col: str = "Churn"):
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=0.2, stratify=y, random_state=42
     )
+
+    return X_train, X_val, y_train, y_val, dv

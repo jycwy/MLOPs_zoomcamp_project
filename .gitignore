@@ -9,3 +9,7 @@ data/
 
 # env
 .env
+
+# mlflow related
+mlruns/
+mlflow.db
