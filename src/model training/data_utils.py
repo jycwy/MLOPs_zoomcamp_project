@@ -51,3 +51,21 @@ def vectorize(df, target_col: str = "Churn"):
     )
 
     return X_train, X_val, y_train, y_val, dv
+
+def prepare_xgb_data(df, target_col: str = "Churn"):
+    """
+    Prepare data for XGBoost
+    """
+    numeric_cols = df.select_dtypes(include=["number"]).columns.to_list()
+    categorical_cols = df.select_dtypes(include=["object"]).columns.to_list()
+
+    # Convert categorical columns to category dtype
+    for col in categorical_cols:
+        df[col] = df[col].astype("category")
+
+    split = split_data_randomly(df)
+
+    x_train, x_val, y_train, y_val = split["x_train"], split["x_test"], split["y_train"], split["y_test"]
+
+    return x_train, x_val, y_train, y_val
+    
