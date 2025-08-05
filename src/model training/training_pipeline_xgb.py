@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import Dict
 from dotenv import load_dotenv
 from xgboost import XGBClassifier
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import (
+    roc_auc_score,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+)
 from data_utils import load_data, vectorize, split_data_randomly, load_parquet, prepare_xgb_data
 from hyperopt import hp, fmin, tpe, STATUS_OK, Trials, space_eval
 from tqdm import tqdm
@@ -25,6 +31,22 @@ MLFLOW_EXPERIMENT_NAME = os.getenv('MLFLOW_EXPERIMENT_NAME', 'test-experiment')
 # MODEL_NAME = os.getenv('MODEL_NAME', 'xgboost_model')
 # RANDOM_STATE = int(os.getenv('RANDOM_STATE', '42'))
 # TEST_SIZE = float(os.getenv('TEST_SIZE', '0.2'))
+
+# Previously discovered best hyperparameters (obtained from an earlier tuning run)
+cached_best_params = {
+    "objective": "binary:logistic",
+    "n_estimators": 350,
+    "max_depth": 19,
+    "min_child_weight": 3.6054254230376572,
+    "learning_rate": 0.0064027841872601595,
+    "gamma": 0.46063546324565136,
+    "colsample_bytree": 0.54,
+    "colsample_bynode": 0.81,
+    "colsample_bylevel": 0.75,
+    "subsample": 0.8,
+    "reg_alpha": 4.399584091428253,
+    "reg_lambda": 2.0034060827004825,
+}
 
 # Configure MLflow
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
@@ -148,11 +170,37 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
     
     # Use vectorize function to properly handle categorical variables
     x_train, x_val, y_train, y_val  = prepare_xgb_data(churn_data)
-    
-    # best params:
-    # {'colsample_bylevel': 0.75, 'colsample_bynode': 0.81, 'colsample_bytree': 0.54, 'gamma': 0.46063546324565136, 'learning_rate': 0.0064027841872601595, 'max_depth': np.int64(19), 'min_child_weight': 3.6054254230376572, 'n_estimators': np.int64(350), 'objective': 'binary:logistic', 'reg_alpha': 4.399584091428253, 'reg_lambda': 2.0034060827004825, 'subsample': 0.8}
-    search_space = get_xgb_params()
-    best_params = tune_hyperparameters(x_train, y_train, search_space)
+
+    # When the environment variable `SKIP_HYPERPARAM_TUNING` is truthy, reuse the cached
+    # parameters instead of running the (time-consuming) tuning procedure again.
+    if os.getenv("SKIP_HYPERPARAM_TUNING", "false").strip().lower() in {"1", "true", "yes"}:
+        best_params = cached_best_params
+    else:
+        search_space = get_xgb_params()
+        best_params = tune_hyperparameters(x_train, y_train, search_space)
+
+    mlflow.xgboost.autolog()
+    with mlflow.start_run():
+        # Enable categorical support so XGBoost accepts pandas "category" dtypes
+        xgb_model = XGBClassifier(**best_params, enable_categorical=True)
+        xgb_model.fit(x_train, y_train)
+
+        y_pred = xgb_model.predict(x_val)
+
+        accuracy_metric = accuracy_score(y_val, y_pred)
+        precision_metric = precision_score(y_val, y_pred)
+        recall_metric = recall_score(y_val, y_pred)
+        f1_score_metric = f1_score(y_val, y_pred)
+        roc_auc_score_metric = roc_auc_score(y_val, xgb_model.predict_proba(x_val)[:, 1])
+
+        mlflow.log_metric("accuracy", accuracy_metric)
+        mlflow.log_metric("precision", precision_metric)
+        mlflow.log_metric("recall", recall_metric)
+        mlflow.log_metric("f1_score", f1_score_metric)
+        mlflow.log_metric("roc_auc_score", roc_auc_score_metric)
+
+        mlflow.end_run()
+        
 
 if __name__ == "__main__":
     # Check if file exists
