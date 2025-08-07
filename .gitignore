@@ -13,3 +13,4 @@ data/
 # mlflow related
 mlruns/
 mlflow.db
+artifacts/

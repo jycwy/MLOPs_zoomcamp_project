@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 # Load environment variables from .env file
 project_root = Path(__file__).resolve().parents[2]
-load_dotenv(dotenv_path=project_root / ".env")
+load_dotenv(dotenv_path=project_root / ".env", override=True)
 
 # Get environment variables
 TRAINING_DATA_PATH = project_root / os.getenv('TRAINING_DATA_PATH', './data/Churn')
@@ -79,61 +79,64 @@ def tune_hyperparameters(
         search_space: dict
     ):
     def xgb_objective(params: Dict) -> float:
-        # cast discrete params to int
-        params = params.copy()
-        params["max_depth"] = int(params["max_depth"])
-        params["n_estimators"] = int(params["n_estimators"])
+        with mlflow.start_run(nested=True):
+            # cast discrete params to int
+            params = params.copy()
+            params["max_depth"] = int(params["max_depth"])
+            params["n_estimators"] = int(params["n_estimators"])
+            mlflow.log_params(params)
 
-        # Use only training data for cross-validation
-        d_train = xgb.DMatrix(X_train.astype("category"), label=y_train,
-                         enable_categorical=True)
+            # Use only training data for cross-validation
+            d_train = xgb.DMatrix(X_train.astype("category"), label=y_train,
+                             enable_categorical=True)
 
-        # Set up parameters for xgb.cv
-        cv_params = {
-            "objective": "binary:logistic",
-            "eval_metric": "auc",
-            "tree_method": "hist",
-            "random_state": 42,
-            "max_depth": params["max_depth"],
-            "min_child_weight": params["min_child_weight"],
-            "learning_rate": params["learning_rate"],
-            "gamma": params["gamma"],
-            "colsample_bytree": params["colsample_bytree"],
-            "colsample_bynode": params["colsample_bynode"],
-            "colsample_bylevel": params["colsample_bylevel"],
-            "subsample": params["subsample"],
-            "reg_alpha": params["reg_alpha"],
-            "reg_lambda": params["reg_lambda"],
-        }
+            # Set up parameters for xgb.cv
+            cv_params = {
+                "objective": "binary:logistic",
+                "eval_metric": "auc",
+                "tree_method": "hist",
+                "random_state": 42,
+                "max_depth": params["max_depth"],
+                "min_child_weight": params["min_child_weight"],
+                "learning_rate": params["learning_rate"],
+                "gamma": params["gamma"],
+                "colsample_bytree": params["colsample_bytree"],
+                "colsample_bynode": params["colsample_bynode"],
+                "colsample_bylevel": params["colsample_bylevel"],
+                "subsample": params["subsample"],
+                "reg_alpha": params["reg_alpha"],
+                "reg_lambda": params["reg_lambda"],
+            }
 
-        # Use cross-validation
-        cv_results = xgb.cv(
-            cv_params,
-            d_train,
-            num_boost_round=params["n_estimators"],
-            nfold=5,
-            early_stopping_rounds=20,
-            verbose_eval=False,
-            seed=42
-        )
+            # Use cross-validation
+            cv_results = xgb.cv(
+                cv_params,
+                d_train,
+                num_boost_round=params["n_estimators"],
+                nfold=5,
+                early_stopping_rounds=20,
+                verbose_eval=False,
+                seed=42
+            )
 
-        # Get the best AUC score from cross-validation
-        auc = cv_results['test-auc-mean'].max()
+            # Get the best AUC score from cross-validation
+            auc = cv_results['test-auc-mean'].max()
+            mlflow.log_metric("auc", auc)
 
-        # Update progress bar if it exists in global scope
-        if hasattr(tune_hyperparameters, '_pbar'):
-            tune_hyperparameters._pbar.update(1)
-            # Display current best score
-            completed_trials = [trial for trial in tune_hyperparameters._trials.trials if trial['result']['status'] == STATUS_OK]
-            if completed_trials:
-                current_best = -min([trial['result']['loss'] for trial in completed_trials])
-                tune_hyperparameters._pbar.set_postfix({'Best AUC': f'{current_best:.4f}'})
+            # Update progress bar if it exists in global scope
+            if hasattr(tune_hyperparameters, '_pbar'):
+                tune_hyperparameters._pbar.update(1)
+                # Display current best score
+                completed_trials = [trial for trial in tune_hyperparameters._trials.trials if trial['result']['status'] == STATUS_OK]
+                if completed_trials:
+                    current_best = -min([trial['result']['loss'] for trial in completed_trials])
+                    tune_hyperparameters._pbar.set_postfix({'Best AUC': f'{current_best:.4f}'})
 
-        # Hyperopt minimizes loss → return negative AUC
-        return {"loss": -auc, "status": STATUS_OK}
+            # Hyperopt minimizes loss → return negative AUC
+            return {"loss": -auc, "status": STATUS_OK}
 
     # Set up progress bar
-    max_evals = 60
+    max_evals = 10 # 60
     tune_hyperparameters._pbar = tqdm(total=max_evals, desc="Hyperparameter Optimization")
     
     trials = Trials()
@@ -171,16 +174,24 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
     # Use vectorize function to properly handle categorical variables
     x_train, x_val, y_train, y_val  = prepare_xgb_data(churn_data)
 
-    # When the environment variable `SKIP_HYPERPARAM_TUNING` is truthy, reuse the cached
-    # parameters instead of running the (time-consuming) tuning procedure again.
-    if os.getenv("SKIP_HYPERPARAM_TUNING", "false").strip().lower() in {"1", "true", "yes"}:
-        best_params = cached_best_params
-    else:
-        search_space = get_xgb_params()
-        best_params = tune_hyperparameters(x_train, y_train, search_space)
-
     mlflow.xgboost.autolog()
+
     with mlflow.start_run():
+        # When the environment variable `SKIP_HYPERPARAM_TUNING` is truthy, reuse the cached
+        # parameters instead of running the (time-consuming) tuning procedure again.
+        if os.getenv("SKIP_HYPERPARAM_TUNING", "false").strip().lower() in {"1", "true", "yes"}:
+            print("Skipping hyperparameter tuning")
+            best_params = cached_best_params
+            mlflow.log_params(best_params)
+            mlflow.set_tag("hpo_status", "skipped")
+        else:
+            print("Tuning hyperparameters")
+            mlflow.set_tag("hpo_status", "executed")
+            search_space = get_xgb_params()
+            best_params = tune_hyperparameters(x_train, y_train, search_space)
+            mlflow.log_params(best_params)
+
+
         # Enable categorical support so XGBoost accepts pandas "category" dtypes
         xgb_model = XGBClassifier(**best_params, enable_categorical=True)
         xgb_model.fit(x_train, y_train)
@@ -198,8 +209,6 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
         mlflow.log_metric("recall", recall_metric)
         mlflow.log_metric("f1_score", f1_score_metric)
         mlflow.log_metric("roc_auc_score", roc_auc_score_metric)
-
-        mlflow.end_run()
         
 
 if __name__ == "__main__":
