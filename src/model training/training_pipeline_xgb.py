@@ -1,10 +1,12 @@
 import os
 import mlflow
+import json
 import xgboost as xgb
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict
+from mlflow.models import infer_signature
 from dotenv import load_dotenv
 from xgboost import XGBClassifier
 from sklearn.metrics import (
@@ -177,6 +179,7 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
     mlflow.xgboost.autolog()
 
     with mlflow.start_run():
+        mlflow.set_tag("mlflow.model-type", "xgboost")
         # When the environment variable `SKIP_HYPERPARAM_TUNING` is truthy, reuse the cached
         # parameters instead of running the (time-consuming) tuning procedure again.
         if os.getenv("SKIP_HYPERPARAM_TUNING", "false").strip().lower() in {"1", "true", "yes"}:
@@ -191,12 +194,22 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
             best_params = tune_hyperparameters(x_train, y_train, search_space)
             mlflow.log_params(best_params)
 
+        mlflow.set_tag("hpo_status", "best_params_used")
 
         # Enable categorical support so XGBoost accepts pandas "category" dtypes
         xgb_model = XGBClassifier(**best_params, enable_categorical=True)
         xgb_model.fit(x_train, y_train)
 
         y_pred = xgb_model.predict(x_val)
+
+        # Explicitly log the model, since autologging can be unreliable.
+        signature = infer_signature(x_val, y_pred)
+        mlflow.xgboost.log_model(
+            xgb_model=xgb_model,
+            artifact_path="model",
+            signature=signature,
+            input_example=x_val.iloc[:5],
+        )
 
         accuracy_metric = accuracy_score(y_val, y_pred)
         precision_metric = precision_score(y_val, y_pred)

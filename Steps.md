@@ -1,5 +1,5 @@
 # Training Process
-- Start MLflow
+- Start MLflow under **src/model training** folder under pipenv shell
 ```bash
     mlflow server \
   --backend-store-uri sqlite:///mlflow.db \
