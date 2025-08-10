@@ -176,7 +176,7 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
     # Use vectorize function to properly handle categorical variables
     x_train, x_val, y_train, y_val  = prepare_xgb_data(churn_data)
 
-    mlflow.xgboost.autolog()
+    mlflow.xgboost.autolog(log_models=False)
 
     with mlflow.start_run():
         mlflow.set_tag("mlflow.model-type", "xgboost")
@@ -204,11 +204,12 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
 
         # Explicitly log the model, since autologging can be unreliable.
         signature = infer_signature(x_val, y_pred)
-        mlflow.xgboost.log_model(
-            xgb_model=xgb_model,
+        mlflow.sklearn.log_model(                      # <-- sklearn flavor
+            sk_model=xgb_model,
             artifact_path="model",
             signature=signature,
             input_example=x_val.iloc[:5],
+            # serialization_format="pickle",  # optional; default is cloudpickle (still .pkl)
         )
 
         accuracy_metric = accuracy_score(y_val, y_pred)
