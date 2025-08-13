@@ -30,7 +30,16 @@ from tqdm import tqdm
 from prefect import flow, get_run_logger, task
 
 # Load environment variables from .env file
-project_root = Path(__file__).resolve().parents[2]
+# Robustly find the repository root by locating common markers
+# This ensures paths are correct when code is executed from Prefect temp dirs
+
+def find_project_root(start_path: Path) -> Path:
+    for candidate in [start_path] + list(start_path.parents):
+        if (candidate / "Pipfile").exists() or (candidate / ".git").exists() or (candidate / "README.md").exists():
+            return candidate
+    return start_path
+
+project_root = find_project_root(Path(__file__).resolve())
 load_dotenv(dotenv_path=project_root / ".env", override=True)
 
 # Get environment variables

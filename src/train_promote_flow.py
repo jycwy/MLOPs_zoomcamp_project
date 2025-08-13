@@ -43,11 +43,11 @@ def train_and_promote_flow(
     logger = get_run_logger()
 
     # Load environment variables from project-level .env
-    load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=True)
+    load_dotenv(dotenv_path=CURRENT_DIR / ".env", override=True)
 
     # Resolve training data path (same convention as training flow's __main__)
     training_dir = os.getenv("TRAINING_DATA_PATH", "./data/Churn")
-    churn_train_path = (PROJECT_ROOT / training_dir / "Churn_train.parquet").resolve()
+    churn_train_path = (CURRENT_DIR / training_dir / "Churn_train.parquet").resolve()
 
     if not churn_train_path.exists():
         raise FileNotFoundError(f"Training data not found at: {churn_train_path}")
