@@ -49,6 +49,11 @@ def train_and_promote_flow(
     training_dir = os.getenv("TRAINING_DATA_PATH", "./data/Churn")
     churn_train_path = (PROJECT_ROOT / training_dir / "Churn_train.parquet").resolve()
 
+    logger.info(f"Current directory: {CURRENT_DIR}")
+    logger.info(f"Current parents: {CURRENT_DIR.parents}")
+    logger.info(f"Project root: {PROJECT_ROOT}")
+    logger.info(f"Training data path: {training_dir}")
+
     if not churn_train_path.exists():
         raise FileNotFoundError(f"Training data not found at: {churn_train_path}")
 
