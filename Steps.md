@@ -30,7 +30,14 @@ prefect server start
   prefect worker start -p default
   ```
 
-  - deploy the flow
+  - deploy the flow under the **root folder**
   ```bash
-  prefect deploy train_promote_flow.py:train_and_promote_flow -n name -p default
+  prefect deploy src/train_promote_flow.py:train_and_promote_flow -n test-training-promote-flow -p default
   ```
+
+  - start a run of the deployed flow
+    - from ui
+    - command line
+    ```bash
+    prefect deployment run train_and_promote_flow/test-training-promote-flow
+    ```
