@@ -20,7 +20,7 @@ pull:
 
 # the deployments section allows you to provide configuration for deploying flows
 deployments:
-- name: name
+- name: test-training-promote-flow
   version: null
   tags: []
   concurrency_limit: null
