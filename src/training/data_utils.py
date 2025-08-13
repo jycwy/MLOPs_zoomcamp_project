@@ -1,6 +1,7 @@
 import pandas as pd
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.model_selection import train_test_split
+from prefect import task
 
 def load_data(path: str):
     """Load data from CSV file"""
@@ -52,6 +53,7 @@ def vectorize(df, target_col: str = "Churn"):
 
     return X_train, X_val, y_train, y_val, dv
 
+
 def prepare_xgb_data(df, target_col: str = "Churn"):
     """
     Prepare data for XGBoost
@@ -68,4 +70,8 @@ def prepare_xgb_data(df, target_col: str = "Churn"):
     x_train, x_val, y_train, y_val = split["x_train"], split["x_test"], split["y_train"], split["y_test"]
 
     return x_train, x_val, y_train, y_val
+
+# Prefect task-wrapped aliases (preserve original function behavior for tests)
+load_parquet_task = task(name="load_parquet")(load_parquet)
+prepare_xgb_data_task = task(name="prepare_xgb_data")(prepare_xgb_data)
     

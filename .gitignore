@@ -14,3 +14,6 @@ data/
 mlruns/
 mlflow.db
 artifacts/
+
+#pycache
+__pycache__/

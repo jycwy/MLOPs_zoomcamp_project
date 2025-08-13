@@ -16,9 +16,18 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
 )
-from data_utils import load_data, vectorize, split_data_randomly, load_parquet, prepare_xgb_data
+from data_utils import (
+    load_data,
+    vectorize,
+    split_data_randomly,
+    load_parquet,
+    prepare_xgb_data,
+    load_parquet_task,
+    prepare_xgb_data_task,
+)
 from hyperopt import hp, fmin, tpe, STATUS_OK, Trials, space_eval
 from tqdm import tqdm
+from prefect import flow, get_run_logger, task
 
 # Load environment variables from .env file
 project_root = Path(__file__).resolve().parents[2]
@@ -27,12 +36,8 @@ load_dotenv(dotenv_path=project_root / ".env", override=True)
 # Get environment variables
 TRAINING_DATA_PATH = project_root / os.getenv('TRAINING_DATA_PATH', './data/Churn')
 
-# MODEL_OUTPUT_PATH = os.getenv('MODEL_OUTPUT_PATH', 'models/')
 MLFLOW_TRACKING_URI = os.getenv('MLFLOW_TRACKING_URI', 'http://localhost:5001')
 MLFLOW_EXPERIMENT_NAME = os.getenv('MLFLOW_EXPERIMENT_NAME', 'test-experiment')
-# MODEL_NAME = os.getenv('MODEL_NAME', 'xgboost_model')
-# RANDOM_STATE = int(os.getenv('RANDOM_STATE', '42'))
-# TEST_SIZE = float(os.getenv('TEST_SIZE', '0.2'))
 
 # Previously discovered best hyperparameters (obtained from an earlier tuning run)
 cached_best_params = {
@@ -168,13 +173,34 @@ def tune_hyperparameters(
 
     return best_params
 
-    
+ 
+@task(name="train_xgb_classifier")
+def train_xgb_classifier_task(best_params: Dict, X_train: pd.DataFrame, y_train: pd.Series) -> XGBClassifier:
+    xgb_model = XGBClassifier(**best_params, enable_categorical=True)
+    xgb_model.fit(X_train, y_train)
+    return xgb_model
 
+
+@task(name="predict")
+def predict_task(model: XGBClassifier, X_val: pd.DataFrame) -> np.ndarray:
+    return model.predict(X_val)
+
+
+@flow(name="train_xgb_model_flow")
 def train_xgb_model(data_path: str, model_name: str, random_state: int, test_size: float):
-    churn_data = load_parquet(data_path)
+    logger = get_run_logger()
+    logger.info(f"Starting training flow: data_path={data_path}, model_name={model_name}")
+
+    logger.info("Loading training data from parquet")
+    churn_data_future = load_parquet_task.submit(data_path)
+    churn_data = churn_data_future.result()
+    logger.info(f"Loaded data shape: {churn_data.shape}")
     
     # Use vectorize function to properly handle categorical variables
-    x_train, x_val, y_train, y_val  = prepare_xgb_data(churn_data)
+    logger.info("Preparing train/validation splits for XGBoost")
+    prepared_future = prepare_xgb_data_task.submit(churn_data)
+    x_train, x_val, y_train, y_val = prepared_future.result()
+    logger.info(f"Prepared splits: X_train={getattr(x_train, 'shape', None)}, X_val={getattr(x_val, 'shape', None)}")
 
     mlflow.xgboost.autolog(log_models=False)
 
@@ -184,23 +210,31 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
         # parameters instead of running the (time-consuming) tuning procedure again.
         if os.getenv("SKIP_HYPERPARAM_TUNING", "false").strip().lower() in {"1", "true", "yes"}:
             print("Skipping hyperparameter tuning")
+            logger.info("Skipping hyperparameter tuning; using cached best parameters")
             best_params = cached_best_params
             mlflow.log_params(best_params)
             mlflow.set_tag("hpo_status", "skipped")
         else:
             print("Tuning hyperparameters")
+            logger.info("Running hyperparameter tuning")
             mlflow.set_tag("hpo_status", "executed")
             search_space = get_xgb_params()
             best_params = tune_hyperparameters(x_train, y_train, search_space)
             mlflow.log_params(best_params)
+        try:
+            logger.info(f"Best hyperparameters: {json.dumps(best_params)}")
+        except Exception:
+            logger.info("Best hyperparameters selected")
 
         mlflow.set_tag("hpo_status", "best_params_used")
 
         # Enable categorical support so XGBoost accepts pandas "category" dtypes
-        xgb_model = XGBClassifier(**best_params, enable_categorical=True)
-        xgb_model.fit(x_train, y_train)
+        logger.info("Training XGBClassifier")
+        xgb_model = train_xgb_classifier_task(best_params, x_train, y_train)
+        logger.info("Model training complete")
 
-        y_pred = xgb_model.predict(x_val)
+        logger.info("Predicting on validation set")
+        y_pred = predict_task(xgb_model, x_val)
 
         # Explicitly log the model, since autologging can be unreliable.
         signature = infer_signature(x_val, y_pred)
@@ -211,6 +245,7 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
             input_example=x_val.iloc[:5],
             # serialization_format="pickle",  # optional; default is cloudpickle (still .pkl)
         )
+        logger.info("Logged model artifact to MLflow")
 
         accuracy_metric = accuracy_score(y_val, y_pred)
         precision_metric = precision_score(y_val, y_pred)
@@ -223,12 +258,20 @@ def train_xgb_model(data_path: str, model_name: str, random_state: int, test_siz
         mlflow.log_metric("recall", recall_metric)
         mlflow.log_metric("f1_score", f1_score_metric)
         mlflow.log_metric("roc_auc_score", roc_auc_score_metric)
-        
-
+        logger.info(
+            "Validation metrics - accuracy=%.4f, precision=%.4f, recall=%.4f, f1=%.4f, roc_auc=%.4f",
+            accuracy_metric,
+            precision_metric,
+            recall_metric,
+            f1_score_metric,
+            roc_auc_score_metric,
+        )
+         
+ 
 if __name__ == "__main__":
     # Check if file exists
     churn_train_path = Path(TRAINING_DATA_PATH) / "Churn_train.parquet"
     if not churn_train_path.exists():
         raise FileNotFoundError(f"Training data not found at: {churn_train_path}")
-    
+     
     train_xgb_model(str(churn_train_path), "xgboost_model", 42, 0.2)
