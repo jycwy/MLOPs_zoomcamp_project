@@ -42,6 +42,9 @@ def find_project_root(start_path: Path) -> Path:
 project_root = find_project_root(Path(__file__).resolve())
 load_dotenv(dotenv_path=project_root / ".env", override=True)
 
+# Disable MLflow "Logged Models" feature to maintain compatibility with older servers
+os.environ.setdefault("MLFLOW_ENABLE_LOGGED_MODELS", "false")
+
 # Get environment variables
 TRAINING_DATA_PATH = project_root / os.getenv('TRAINING_DATA_PATH', './data/Churn')
 
