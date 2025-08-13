@@ -6,7 +6,7 @@ from prefect import flow, get_run_logger, task
 
 # Ensure imports work despite the space in `training` directory
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parents[1]
+PROJECT_ROOT = CURRENT_DIR.parent
 MODEL_TRAINING_DIR = CURRENT_DIR / "training"
 
 # Put `src/` and `src/training/` on sys.path so we can import modules easily
@@ -48,11 +48,6 @@ def train_and_promote_flow(
     # Resolve training data path (same convention as training flow's __main__)
     training_dir = os.getenv("TRAINING_DATA_PATH", "./data/Churn")
     churn_train_path = (PROJECT_ROOT / training_dir / "Churn_train.parquet").resolve()
-
-    logger.info(f"Current directory: {CURRENT_DIR}")
-    logger.info(f"Current parents: {CURRENT_DIR.parents}")
-    logger.info(f"Project root: {PROJECT_ROOT}")
-    logger.info(f"Training data path: {training_dir}")
 
     if not churn_train_path.exists():
         raise FileNotFoundError(f"Training data not found at: {churn_train_path}")
